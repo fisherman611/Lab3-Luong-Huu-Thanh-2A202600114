@@ -1,7 +1,7 @@
 import os
 import re
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from src.core.llm_provider import LLMProvider
 from src.telemetry.logger import logger
 from src.telemetry.metrics import tracker
@@ -94,6 +94,16 @@ class ReActAgent:
         """
         Chạy ReAct loop
         """
+        answer, _trace = self.run_with_trace(user_input)
+        return answer
+
+    def run_with_trace(self, user_input: str) -> Tuple[str, List[Dict[str, Any]]]:
+        """
+        Chạy ReAct loop và trả về trace cho UI/đánh giá.
+
+        Returns:
+            (final_answer, trace_steps)
+        """
         logger.log_event("AGENT_START", {
             "input": user_input, 
             "model": self.llm.model_name
@@ -102,6 +112,7 @@ class ReActAgent:
         # Khởi tạo prompt với câu hỏi
         conversation = f"User: {user_input}\n\n"
         steps = 0
+        trace: List[Dict[str, Any]] = []
 
         while steps < self.max_steps:
             steps += 1
@@ -138,14 +149,16 @@ class ReActAgent:
                 
             except Exception as e:
                 logger.log_event("LLM_ERROR", {"error": str(e)})
-                return f"Lỗi khi gọi LLM: {str(e)}"
+                return f"Lỗi khi gọi LLM: {str(e)}", trace
 
             if not llm_output.strip():
                 conversation += "Observation: [LLM không trả về nội dung hợp lệ. Vui lòng tiếp tục theo format Thought/Action/Observation hoặc Final Answer.]\n"
+                trace.append({"step": steps, "llm_output": llm_output, "observation": "[empty_llm_output]"})
                 continue
             
             # Thêm response vào conversation
             conversation += llm_output + "\n"
+            step_record: Dict[str, Any] = {"step": steps, "llm_output": llm_output}
             
             # 2. Kiểm tra Final Answer
             if "Final Answer:" in llm_output:
@@ -155,14 +168,26 @@ class ReActAgent:
                     "success": True,
                     "answer": final_answer
                 })
-                return final_answer
+                step_record["final_answer"] = final_answer
+                trace.append(step_record)
+                return final_answer, trace
             
             # 3. Parse và execute Action
-            action_match = re.search(r'Action:\s*(\w+)\((.*?)\)', llm_output)
-            
-            if action_match:
-                tool_name = action_match.group(1)
-                arguments = action_match.group(2).strip().strip('"').strip("'")
+            tool_name = None
+            arguments = None
+            for line in llm_output.splitlines():
+                if not line.strip().startswith("Action:"):
+                    continue
+                m = re.match(r"^\s*Action:\s*(\w+)\((.*)\)\s*$", line.strip())
+                if m:
+                    tool_name = m.group(1)
+                    arguments = m.group(2)
+                break
+
+            if tool_name is not None and arguments is not None:
+                arguments = arguments.strip().strip('"').strip("'")
+                step_record["tool"] = tool_name
+                step_record["args"] = arguments
                 
                 logger.log_event("TOOL_CALL", {
                     "step": steps,
@@ -172,6 +197,7 @@ class ReActAgent:
                 
                 # Execute tool
                 observation = self._execute_tool(tool_name, arguments)
+                step_record["observation"] = observation
                 
                 logger.log_event("TOOL_RESULT", {
                     "step": steps,
@@ -183,6 +209,9 @@ class ReActAgent:
             else:
                 # Không tìm thấy Action, nhắc nhở agent
                 conversation += "Observation: [Không tìm thấy Action hợp lệ. Vui lòng sử dụng format: Action: tool_name(arguments)]\n"
+                step_record["observation"] = "[Không tìm thấy Action hợp lệ]"
+
+            trace.append(step_record)
 
             if self.step_delay_seconds > 0:
                 time.sleep(self.step_delay_seconds)
@@ -193,7 +222,7 @@ class ReActAgent:
             "success": False,
             "reason": "max_steps_exceeded"
         })
-        return "Không thể hoàn thành trong số bước cho phép. Hãy thử câu hỏi cụ thể hơn."
+        return "Không thể hoàn thành trong số bước cho phép. Hãy thử câu hỏi cụ thể hơn.", trace
 
     def _execute_tool(self, tool_name: str, args: str) -> str:
         """
@@ -201,6 +230,12 @@ class ReActAgent:
         """
         for tool in self.tools:
             if tool['name'] == tool_name:
-                # TODO: Implement dynamic function calling or simple if/else
-                return f"Result of {tool_name}"
+                fn = tool.get("function")
+                if not callable(fn):
+                    return f"Lỗi: tool '{tool_name}' không có function hợp lệ."
+                try:
+                    result = fn(args)
+                    return result if isinstance(result, str) else str(result)
+                except Exception as e:
+                    return f"Lỗi khi chạy tool '{tool_name}': {e}"
         return f"Tool {tool_name} not found."
