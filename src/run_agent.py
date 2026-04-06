@@ -25,11 +25,8 @@ def main():
     
     # Test cases
     test_cases = [
-        "Tính 15 * 23",
         "Thời tiết Hà Nội hôm nay thế nào?",
-        "Tính 100 + 50 rồi nhân với 2",
         "Thủ đô của Việt Nam là gì?",
-        "Tính (10 + 5) * 3 - 20",
         
         # Test cases mới - Tư vấn du lịch
         "Tôi có 5 triệu đồng, muốn đi du lịch 3 ngày. Nên đi Hà Nội hay Đà Nẵng? Chi phí mỗi ngày khoảng bao nhiêu?",

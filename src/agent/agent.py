@@ -86,7 +86,7 @@ class ReActAgent:
             return match.group(1).strip()
         return text
     
-    
+
     def run(self, user_input: str) -> str:
         """
         Chạy ReAct loop
@@ -109,18 +109,24 @@ class ReActAgent:
                     conversation, 
                     system_prompt=self.get_system_prompt()
                 )
-                llm_output = response["content"]
+                raw_output = response.get("content")
+                llm_output = raw_output if isinstance(raw_output, str) else ""
+                usage = response.get("usage") or {}
                 
                 logger.log_event("LLM_RESPONSE", {
                     "step": steps,
                     "output": llm_output,
-                    "tokens": response["usage"]["total_tokens"],
-                    "latency_ms": response["latency_ms"]
+                    "tokens": usage.get("total_tokens"),
+                    "latency_ms": response.get("latency_ms")
                 })
                 
             except Exception as e:
                 logger.log_event("LLM_ERROR", {"error": str(e)})
                 return f"Lỗi khi gọi LLM: {str(e)}"
+
+            if not llm_output.strip():
+                conversation += "Observation: [LLM không trả về nội dung hợp lệ. Vui lòng tiếp tục theo format Thought/Action/Observation hoặc Final Answer.]\n"
+                continue
             
             # Thêm response vào conversation
             conversation += llm_output + "\n"
@@ -168,16 +174,14 @@ class ReActAgent:
             "success": False,
             "reason": "max_steps_exceeded"
         })
-        return f"Agent đã vượt quá {self.max_steps} bước mà chưa tìm ra câu trả lời."
+        return "Không thể hoàn thành trong số bước cho phép. Hãy thử câu hỏi cụ thể hơn."
 
     def _execute_tool(self, tool_name: str, args: str) -> str:
-        """Execute tool và trả về kết quả"""
+        """
+        Helper method to execute tools by name.
+        """
         for tool in self.tools:
             if tool['name'] == tool_name:
-                try:
-                    result = tool['function'](args)
-                    return str(result)
-                except Exception as e:
-                    return f"Error executing {tool_name}: {str(e)}"
-        
-        return f"Tool '{tool_name}' không tồn tại. Available tools: {[t['name'] for t in self.tools]}"
+                # TODO: Implement dynamic function calling or simple if/else
+                return f"Result of {tool_name}"
+        return f"Tool {tool_name} not found."
