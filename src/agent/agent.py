@@ -4,6 +4,7 @@ import time
 from typing import List, Dict, Any, Optional
 from src.core.llm_provider import LLMProvider
 from src.telemetry.logger import logger
+from src.telemetry.metrics import tracker
 
 class ReActAgent:
     """
@@ -121,6 +122,19 @@ class ReActAgent:
                     "tokens": usage.get("total_tokens"),
                     "latency_ms": response.get("latency_ms")
                 })
+
+                try:
+                    tracker.track_request(
+                        provider=response.get("provider", "unknown"),
+                        model=self.llm.model_name,
+                        usage=usage,
+                        latency_ms=response.get("latency_ms") or 0,
+                    )
+                except Exception as metric_error:
+                    logger.log_event("METRIC_ERROR", {
+                        "step": steps,
+                        "error": str(metric_error)
+                    })
                 
             except Exception as e:
                 logger.log_event("LLM_ERROR", {"error": str(e)})
