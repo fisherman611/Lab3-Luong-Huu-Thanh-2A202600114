@@ -171,11 +171,13 @@ class ReActAgent:
         return f"Agent đã vượt quá {self.max_steps} bước mà chưa tìm ra câu trả lời."
 
     def _execute_tool(self, tool_name: str, args: str) -> str:
-        """
-        Helper method to execute tools by name.
-        """
+        """Execute tool và trả về kết quả"""
         for tool in self.tools:
             if tool['name'] == tool_name:
-                # TODO: Implement dynamic function calling or simple if/else
-                return f"Result of {tool_name}"
-        return f"Tool {tool_name} not found."
+                try:
+                    result = tool['function'](args)
+                    return str(result)
+                except Exception as e:
+                    return f"Error executing {tool_name}: {str(e)}"
+        
+        return f"Tool '{tool_name}' không tồn tại. Available tools: {[t['name'] for t in self.tools]}"
