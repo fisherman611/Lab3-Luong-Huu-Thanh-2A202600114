@@ -36,32 +36,97 @@ class ReActAgent:
         Final Answer: your final response.
         """
 
+
+    def _extract_final_answer(self, text: str) -> str:
+        """Trích xuất Final Answer từ text"""
+        match = re.search(r'Final Answer:\s*(.+)', text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return text
+    
+    
     def run(self, user_input: str) -> str:
         """
-        TODO: Implement the ReAct loop logic.
-        1. Generate Thought + Action.
-        2. Parse Action and execute Tool.
-        3. Append Observation to prompt and repeat until Final Answer.
+        Chạy ReAct loop
         """
-        logger.log_event("AGENT_START", {"input": user_input, "model": self.llm.model_name})
+        logger.log_event("AGENT_START", {
+            "input": user_input, 
+            "model": self.llm.model_name
+        })
         
-        current_prompt = user_input
+        # Khởi tạo prompt với câu hỏi
+        conversation = f"User: {user_input}\n\n"
         steps = 0
 
         while steps < self.max_steps:
-            # TODO: Generate LLM response
-            # result = self.llm.generate(current_prompt, system_prompt=self.get_system_prompt())
-            
-            # TODO: Parse Thought/Action from result
-            
-            # TODO: If Action found -> Call tool -> Append Observation
-            
-            # TODO: If Final Answer found -> Break loop
-            
             steps += 1
             
-        logger.log_event("AGENT_END", {"steps": steps})
-        return "Not implemented. Fill in the TODOs!"
+            # 1. Generate response từ LLM
+            try:
+                response = self.llm.generate(
+                    conversation, 
+                    system_prompt=self.get_system_prompt()
+                )
+                llm_output = response["content"]
+                
+                logger.log_event("LLM_RESPONSE", {
+                    "step": steps,
+                    "output": llm_output,
+                    "tokens": response["usage"]["total_tokens"],
+                    "latency_ms": response["latency_ms"]
+                })
+                
+            except Exception as e:
+                logger.log_event("LLM_ERROR", {"error": str(e)})
+                return f"Lỗi khi gọi LLM: {str(e)}"
+            
+            # Thêm response vào conversation
+            conversation += llm_output + "\n"
+            
+            # 2. Kiểm tra Final Answer
+            if "Final Answer:" in llm_output:
+                final_answer = self._extract_final_answer(llm_output)
+                logger.log_event("AGENT_END", {
+                    "steps": steps,
+                    "success": True,
+                    "answer": final_answer
+                })
+                return final_answer
+            
+            # 3. Parse và execute Action
+            action_match = re.search(r'Action:\s*(\w+)\((.*?)\)', llm_output)
+            
+            if action_match:
+                tool_name = action_match.group(1)
+                arguments = action_match.group(2).strip().strip('"').strip("'")
+                
+                logger.log_event("TOOL_CALL", {
+                    "step": steps,
+                    "tool": tool_name,
+                    "args": arguments
+                })
+                
+                # Execute tool
+                observation = self._execute_tool(tool_name, arguments)
+                
+                logger.log_event("TOOL_RESULT", {
+                    "step": steps,
+                    "observation": observation
+                })
+                
+                # Thêm observation vào conversation
+                conversation += f"Observation: {observation}\n"
+            else:
+                # Không tìm thấy Action, nhắc nhở agent
+                conversation += "Observation: [Không tìm thấy Action hợp lệ. Vui lòng sử dụng format: Action: tool_name(arguments)]\n"
+        
+        # Hết số bước cho phép
+        logger.log_event("AGENT_END", {
+            "steps": steps,
+            "success": False,
+            "reason": "max_steps_exceeded"
+        })
+        return f"Agent đã vượt quá {self.max_steps} bước mà chưa tìm ra câu trả lời."
 
     def _execute_tool(self, tool_name: str, args: str) -> str:
         """
