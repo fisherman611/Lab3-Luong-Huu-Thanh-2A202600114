@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from typing import List, Dict, Any, Optional
 from src.core.llm_provider import LLMProvider
 from src.telemetry.logger import logger
@@ -10,10 +11,11 @@ class ReActAgent:
     Students should implement the core loop logic and tool execution.
     """
     
-    def __init__(self, llm: LLMProvider, tools: List[Dict[str, Any]], max_steps: int = 5):
+    def __init__(self, llm: LLMProvider, tools: List[Dict[str, Any]], max_steps: int = 5, step_delay_seconds: float = 0.0):
         self.llm = llm
         self.tools = tools
         self.max_steps = max_steps
+        self.step_delay_seconds = max(step_delay_seconds, 0.0)
         self.history = []
 
     def get_system_prompt(self) -> str:
@@ -167,6 +169,9 @@ class ReActAgent:
             else:
                 # Không tìm thấy Action, nhắc nhở agent
                 conversation += "Observation: [Không tìm thấy Action hợp lệ. Vui lòng sử dụng format: Action: tool_name(arguments)]\n"
+
+            if self.step_delay_seconds > 0:
+                time.sleep(self.step_delay_seconds)
         
         # Hết số bước cho phép
         logger.log_event("AGENT_END", {
